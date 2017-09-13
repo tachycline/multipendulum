@@ -71,7 +71,7 @@ class MultiPendulum(object):
         # Generate equations of motion
         self.KM = mechanics.KanesMethod(A, q_ind=self.q, u_ind=self.u,
                                    kd_eqs=kinetic_odes)
-        self.fr, self.fr_star = self.KM.kanes_equations(forces, particles)
+        self.fr, self.fr_star = self.KM.kanes_equations(particles, forces)
         
         # calculate eigenmodes/eigenfrequencies
         self.calculate_linear_eigenmodes()
