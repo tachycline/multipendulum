@@ -213,7 +213,8 @@ class MultiPendulum(object):
         fig, ax = plt.subplots(figsize=(6, 6))
         fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
         ax.axis('off')
-        ax.set(xlim=(-1, 1), ylim=(-1, 1))
+        radius = sum(self.lengths)*1.1
+        ax.set(xlim=(-radius, radius), ylim=(-radius, radius))
 
         line, = ax.plot([], [], 'o-', lw=2)
 
