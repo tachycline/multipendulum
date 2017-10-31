@@ -42,6 +42,7 @@ class MultiPendulum(object):
         A = mechanics.ReferenceFrame('A')
         P = mechanics.Point('P')
         P.set_vel(A, 0)
+        self.origin = P
 
         # lists to hold particles, forces, and kinetic ODEs
         # for each pendulum in the chain
@@ -51,11 +52,11 @@ class MultiPendulum(object):
 
         for i in range(n):
             # Create a reference frame following the i^th mass
-            Ai = A.orientnew('A_' + str(i), 'Axis', [self.q[i], A.z])
-            Ai.set_ang_vel(A, self.u[i] * A.z)
+            Ai = A.orientnew('A_' + str(i), 'Axis', [self.q[i], A.x])
+            Ai.set_ang_vel(A, self.u[i] * A.x)
 
             # Create a point in this reference frame
-            Pi = P.locatenew('P_' + str(i), self.l[i] * Ai.x)
+            Pi = P.locatenew('P_' + str(i), -self.l[i] * Ai.z)
             Pi.v2pt_theory(P, A, Ai)
 
             # Create a new particle of mass m[i] at this point
@@ -63,7 +64,7 @@ class MultiPendulum(object):
             particles.append(Pai)
 
             # Set forces & compute kinematic ODE
-            forces.append((Pi, self.m[i] * self.g * A.x))
+            forces.append((Pi, -self.m[i] * self.g * A.z))
             kinetic_odes.append(self.q[i].diff(self.t) - self.u[i])
 
             P = Pi
@@ -72,6 +73,12 @@ class MultiPendulum(object):
         self.KM = mechanics.KanesMethod(A, q_ind=self.q, u_ind=self.u,
                                    kd_eqs=kinetic_odes)
         self.fr, self.fr_star = self.KM.kanes_equations(particles, forces)
+        
+        # for external use with energetics -- maybe temporary?
+        self.A = A
+        self.particles = particles
+        self.forces = forces
+        self.kinetic_odes = kinetic_odes
         
         # calculate eigenmodes/eigenfrequencies
         self.calculate_linear_eigenmodes()
@@ -134,6 +141,23 @@ class MultiPendulum(object):
         self.masses = np.broadcast_to(masses, self.n)
         # recalculate eigenmodes
         self.calculate_linear_eigenmodes()
+        
+    def build_energy_func(self):
+        T = 0
+        V = 0
+        
+        for idx,pai in enumerate(self.particles):
+            T += pai.kinetic_energy(self.A)
+            posvec = mechanics.express(pai.point.pos_from(self.origin), self.A)
+            V += posvec.dot(self.A.z)*self.m[idx]*self.g
+
+        E = T + V
+        parameters = [self.g] + list(self.l) + list(self.m)
+        parameter_vals = [9.81] + list(self.lengths) + list(self.masses)
+        self.E_numerical = E.subs(dict(zip(parameters, parameter_vals)))
+        
+        coords = list(self.q) + list(self.u)
+        return sp.lambdify(coords, self.E_numerical)
     
     def calculate_linear_eigenmodes(self):
         op_point = dict(zip(self.q+self.u, np.zeros_like(self.q+self.u)))
@@ -208,7 +232,7 @@ class MultiPendulum(object):
         """Generate an animation"""
         
         self.integrate(times)
-        x, y = get_xy_coords(self.timeseries)
+        x, y = get_xy_coords(self.timeseries, self.lengths)
     
         fig, ax = plt.subplots(figsize=(6, 6))
         fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
