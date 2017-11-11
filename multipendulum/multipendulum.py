@@ -37,7 +37,6 @@ class MultiPendulum(object):
         self.lengths = np.broadcast_to(1/n, n)
         self.masses = np.broadcast_to(1.0, n)
 
-
         # Create pivot point reference frame
         A = mechanics.ReferenceFrame('A')
         P = mechanics.Point('P')
@@ -143,21 +142,39 @@ class MultiPendulum(object):
         self.calculate_linear_eigenmodes()
 
     def build_energy_func(self):
-        T = 0
-        V = 0
+        """Build functions to calculate energy terms and total energy"""
 
+        params = [self.g] + list(self.l) + list(self.m)
+        param_vals = [9.81] + list(self.lengths) + list(self.masses)
+
+        # assemble terms analytically first
+        self.energies = dict()
+        self.energies["T"] = 0
+        self.energies["V"] = 0
+        
         for idx,pai in enumerate(self.particles):
-            T += pai.kinetic_energy(self.A)
+            # kinetic
+            self.energies["T_{}".format(idx)] = pai.kinetic_energy(self.A)
+            self.energies["T"] += self.energies["T_{}".format(idx)]
+
+            # potential
             posvec = mechanics.express(pai.point.pos_from(self.origin), self.A)
-            V += posvec.dot(self.A.z)*self.m[idx]*self.g
+            self.energies["V_{}".format(idx)] = posvec.dot(self.A.z)*self.m[idx]*self.g
+            self.energies["V"] += self.energies["V_{}".format(idx)]
+            
+        self.energies['E'] = self.energies["T"] + self.energies["V"]
 
-        E = T + V
-        parameters = [self.g] + list(self.l) + list(self.m)
-        parameter_vals = [9.81] + list(self.lengths) + list(self.masses)
-        self.E_numerical = E.subs(dict(zip(parameters, parameter_vals)))
+        # now substitute in parameters to get numerical expressions
+        self.numerical_energies = dict()
+        for label, energy in self.energies.items():
+            self.numerical_energies[label] = energy.subs(dict(zip(params,
+                                                                  param_vals)))
 
-        coords = list(self.q) + list(self.u)
-        self.ecalc = sp.lambdify(coords, self.E_numerical)
+        # finally lambdify to make executable functions
+        self.efuncs = dict()
+        coords = list(self.q) + list(self.u)        
+        for label, energy in self.numerical_energies.items():
+            self.efuncs[label] = sp.lambdify(coords, energy)
 
     def make_energy_timeseries(self):
         pass
