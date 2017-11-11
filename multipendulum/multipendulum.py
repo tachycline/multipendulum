@@ -142,7 +142,14 @@ class MultiPendulum(object):
         self.calculate_linear_eigenmodes()
 
     def build_energy_func(self):
-        """Build functions to calculate energy terms and total energy"""
+        """Build functions to calculate energy terms and total energy
+
+        Produces three dictionaries:
+        * self.energies, which contains purely symbolic forms for the energy terms
+        * self.numerical_energies: as above, but with numerical values for l and m
+        * self.efuncs: executable functions for calculating energy terms for a point
+                       in phase space
+        """
 
         params = [self.g] + list(self.l) + list(self.m)
         param_vals = [9.81] + list(self.lengths) + list(self.masses)
@@ -151,7 +158,7 @@ class MultiPendulum(object):
         self.energies = dict()
         self.energies["T"] = 0
         self.energies["V"] = 0
-        
+
         for idx,pai in enumerate(self.particles):
             # kinetic
             self.energies["T_{}".format(idx)] = pai.kinetic_energy(self.A)
@@ -161,7 +168,7 @@ class MultiPendulum(object):
             posvec = mechanics.express(pai.point.pos_from(self.origin), self.A)
             self.energies["V_{}".format(idx)] = posvec.dot(self.A.z)*self.m[idx]*self.g
             self.energies["V"] += self.energies["V_{}".format(idx)]
-            
+
         self.energies['E'] = self.energies["T"] + self.energies["V"]
 
         # now substitute in parameters to get numerical expressions
@@ -172,19 +179,36 @@ class MultiPendulum(object):
 
         # finally lambdify to make executable functions
         self.efuncs = dict()
-        coords = list(self.q) + list(self.u)        
+        coords = list(self.q) + list(self.u)
         for label, energy in self.numerical_energies.items():
             self.efuncs[label] = sp.lambdify(coords, energy)
 
     def make_energy_timeseries(self):
-        pass
+        """Applies the energy functions to the results of an integration
+
+        Stores the results in a dictionary, keyed by the same labels used in
+        self.energies, etc.
+        """
+
+        self.energy_timeseries = dict()
+        for label, energy in self.efuncs.items():
+            def wrapper(pos):
+                return energy(*pos)
+
+            self.energy_timeseries[label] = np.apply_along_axis(wrapper, 1, self.timeseries)
+
 
 
     def calculate_linear_eigenmodes(self):
+        """Calculates linear eigenmodes via diagonalization"""
+
         op_point = dict(zip(self.q+self.u, np.zeros_like(self.q+self.u)))
         A, B, C = self.KM.linearize(op_point=op_point, A_and_B=True, new_method=True)
+
+        # pull out the quadrant of the matrix we care about
         Asimp = -sp.simplify(A)[self.n:2*self.n, 0:self.n]
 
+        # substitute in numerical values for parameters
         parameters = [self.g] + list(self.l) + list(self.m)
         parameter_vals = [9.81] + list(self.lengths) + list(self.masses)
         Anumerical = Asimp.subs(dict(zip(parameters, parameter_vals)))
@@ -380,6 +404,8 @@ class MultiPendulum(object):
         outfile.close()
 
     def powerspectrum(self, eigenmodes=False):
+        """Compute and plot a power spectrum"""
+
         spacing = (np.max(self.times) - np.min(self.times))/len(self.times)
         frequencies = rfftfreq(len(self.times), spacing)
 
