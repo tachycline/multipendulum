@@ -17,10 +17,10 @@ from IPython.display import HTML
 
 class MultiPendulum(object):
     """Class for simulating a multiple pendulum system."""
-    
+
     def __init__(self, n):
         """Initialize a multi-pendulum with n links."""
-        
+
         self.n = n
         self.timeseries = None
         self.q = mechanics.dynamicsymbols('theta_:{0}'.format(n))
@@ -32,12 +32,12 @@ class MultiPendulum(object):
 
         # gravity and time symbols
         self.g, self.t = symbols('g,t')
-        
+
         # default values for mass and length
         self.lengths = np.broadcast_to(1/n, n)
         self.masses = np.broadcast_to(1.0, n)
-        
-        
+
+
         # Create pivot point reference frame
         A = mechanics.ReferenceFrame('A')
         P = mechanics.Point('P')
@@ -73,43 +73,43 @@ class MultiPendulum(object):
         self.KM = mechanics.KanesMethod(A, q_ind=self.q, u_ind=self.u,
                                    kd_eqs=kinetic_odes)
         self.fr, self.fr_star = self.KM.kanes_equations(particles, forces)
-        
+
         # for external use with energetics -- maybe temporary?
         self.A = A
         self.particles = particles
         self.forces = forces
         self.kinetic_odes = kinetic_odes
-        
+
         # calculate eigenmodes/eigenfrequencies
         self.calculate_linear_eigenmodes()
-        
+
         # default times for integration
         self.times = np.linspace(0,100,10000)
-        
+
     def set_initial_conditions(self, theta_0, omega_0, degrees=True, eigenmodes=False):
         """Set initial conditions.
-        
+
         Parameters
         ----------
         theta_0: float or iterable of floats
             contains inital position amplitudes. Should either be a single value or
             a tuple, list, or array of n floats, where n is the number of links.
-            
+
         omega_0: float or iterable of floats
             contains initial velocity amplitudes. Should either be a single value or
             a tuple, list, or array of n floats, where n is the number of links.
-            
+
         If theta_0 and/or omega_0 contain a single value, that value will be broadcast
         to all positions/velocities.
-        
+
         degrees: Boolean
             If true, interpret theta_0 and omega_0 as degrees, and convert to radians.
-            
+
         eigenmodes: Boolean
             If true, theta_0 and omega_0 are interpreted as amplitudes for the linear
             eigenmodes instead of individual positons/velocities.
-            
-            
+
+
         Returns:
         --------
         Nothing. (Initial conditions are stored in self.y0)
@@ -125,27 +125,27 @@ class MultiPendulum(object):
             positions = (self.S * sp.Matrix([y0[0:self.n]]).T).T
             velocities = (self.S * sp.Matrix([y0[self.n:2*self.n]]).T).T
             self.y0 = np.array(positions.tolist()[0] + velocities.tolist()[0]).astype(np.float64)
-            
+
         else:
             self.y0 = y0
-            
-    
+
+
     def set_lengths(self, lengths):
         """setter for lengths"""
         self.lengths = np.broadcast_to(lengths, self.n)
         # recalculate eigenmodes
         self.calculate_linear_eigenmodes()
-    
+
     def set_masses(self, masses):
         """setter for masses"""
         self.masses = np.broadcast_to(masses, self.n)
         # recalculate eigenmodes
         self.calculate_linear_eigenmodes()
-        
+
     def build_energy_func(self):
         T = 0
         V = 0
-        
+
         for idx,pai in enumerate(self.particles):
             T += pai.kinetic_energy(self.A)
             posvec = mechanics.express(pai.point.pos_from(self.origin), self.A)
@@ -155,41 +155,45 @@ class MultiPendulum(object):
         parameters = [self.g] + list(self.l) + list(self.m)
         parameter_vals = [9.81] + list(self.lengths) + list(self.masses)
         self.E_numerical = E.subs(dict(zip(parameters, parameter_vals)))
-        
+
         coords = list(self.q) + list(self.u)
-        return sp.lambdify(coords, self.E_numerical)
-    
+        self.ecalc = sp.lambdify(coords, self.E_numerical)
+
+    def make_energy_timeseries(self):
+        pass
+
+
     def calculate_linear_eigenmodes(self):
         op_point = dict(zip(self.q+self.u, np.zeros_like(self.q+self.u)))
         A, B, C = self.KM.linearize(op_point=op_point, A_and_B=True, new_method=True)
         Asimp = -sp.simplify(A)[self.n:2*self.n, 0:self.n]
-        
+
         parameters = [self.g] + list(self.l) + list(self.m)
         parameter_vals = [9.81] + list(self.lengths) + list(self.masses)
         Anumerical = Asimp.subs(dict(zip(parameters, parameter_vals)))
         self.S, self.D = Anumerical.diagonalize()
-                
-            
+
+
     def integrate(self, times=None):
         """Carry out the integration.
-        
+
         Parameters:
         -----------
         times: numpy array of time values for integration; optional.
             if not supplied, the integrator will use whatever is stored
             in self.times, which by default goes from 0 to 100 in steps of 0.01.
-            
+
         Returns:
         --------
         Nothing, but stores output in self.timeseries.
         """
-        
+
         # deal with times argument
         if times is None:
             times = self.times
         else:
             self.times = times
-        
+
         # Fixed parameters: gravitational constant, lengths, and masses
         parameters = [self.g] + list(self.l) + list(self.m)
         parameter_vals = [9.81] + list(self.lengths) + list(self.masses)
@@ -203,7 +207,7 @@ class MultiPendulum(object):
         mm_sym = self.KM.mass_matrix_full.subs(kds).subs(unknown_dict)
         fo_sym = self.KM.forcing_full.subs(kds).subs(unknown_dict)
 
-        # create functions for numerical calculation 
+        # create functions for numerical calculation
         mm_func = lambdify(unknowns + parameters, mm_sym)
         fo_func = lambdify(unknowns + parameters, fo_sym)
 
@@ -215,10 +219,10 @@ class MultiPendulum(object):
 
         # ODE integration
         self.timeseries = odeint(gradient, self.y0, times, args=(parameter_vals,))
-    
+
     def project_timeseries_to_eigenmodes(self):
         """Project the timeseries onto the eigenmode basis."""
-        
+
         thetats = self.timeseries[:,0:self.n].T
         thetadotts = self.timeseries[:,self.n:2*self.n].T
 
@@ -226,14 +230,14 @@ class MultiPendulum(object):
         eigvts = np.matmul(np.array(self.S.inv()).astype(np.float64), thetadotts)
 
         self.eigts = np.vstack((eigts, eigvts)).T
-    
-    
+
+
     def animate(self, times=None):
         """Generate an animation"""
-        
+
         self.integrate(times)
         x, y = get_xy_coords(self.timeseries, self.lengths)
-    
+
         fig, ax = plt.subplots(figsize=(6, 6))
         fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
         ax.axis('off')
@@ -254,24 +258,24 @@ class MultiPendulum(object):
                                             interval=1000 * self.times.max() / len(self.times),
                                             blit=True, init_func=init)
         plt.close(fig)
-    
+
     def phase_plots(self, eigenmodes=False):
         """Make phase space plots.
-        
+
         Parameters
         ----------
-        
+
         eigenmodes: Boolean
             if true, phase plots are of eigenmodes. If false, phase plots are of
             individual links in the chain of pendulums.
-            
+
         Returns:
         --------
         The figure instance.
         """
         if self.timeseries is None:
             raise ValueError("Nothing to plot!")
-        
+
         if eigenmodes:
             coordinates = sp.symbols("phi_:{}".format(self.n))
             velocities = sp.symbols("phidot_:{}".format(self.n))
@@ -283,8 +287,8 @@ class MultiPendulum(object):
             velocities = self.u
             timeseries = self.timeseries
             titlestring = "Phase space plot, pendulum {}"
-        
-        
+
+
         fig, ax = plt.subplots(ncols=self.n)
         fig.set_figwidth(self.n*10)
         fig.set_figheight(10)
@@ -295,17 +299,17 @@ class MultiPendulum(object):
             axis.set_title(titlestring.format(idx), fontsize=22)
         #plt.close(fig)
         return fig
-            
+
     def time_series_plots(self, eigenmodes=False):
         """Plot time series.
-        
+
         Parameters
         ----------
         eigenmodes: Boolean
             if true, plot eigenmode amplitudes as a function of time. If false,
             plot the amplitudes of individual coordinates.
-            
-        Returns the figure.        
+
+        Returns the figure.
         """
         fig,ax = plt.subplots(nrows=4, ncols=1, sharex=True)
         fig.set_figwidth(16)
@@ -324,32 +328,32 @@ class MultiPendulum(object):
             for i in range(self.n*2):
                 ax[i].plot(self.times, self.timeseries[:,i])
                 ax[i].set_ylabel(r"${}$".format(sp.latex(coordinates[i])), fontsize=16)
-    
+
             ax[0].set_title("Coordinate timeseries", fontsize=24)
-        
+
         ax[-1].set_xlabel("time (s)", fontsize=16)
         return fig
-        
+
     def serialize(self, filename="MultiPendulum.h5"):
         """Write the integration results to an HDF5 archive.
-        
+
         Parameters:
         -----------
         filename: string, optional
             gives the name of the HDF5 archive.
         """
-        
+
         runkey = tuple(list(self.lengths) + list(self.masses) + list(self.y0))
         timekey = (np.min(self.times), np.max(self.times), len(self.times))
-        
+
         path = "{}/{}/{}".format(self.n, runkey, timekey)
-        
+
         outfile = h5py.File(filename, 'a')
         try:
             mygrp = outfile[path]
         except KeyError:
             mygrp = outfile.create_group(path)
-        
+
         try:
             mygrp['times'] = self.times
             mygrp['timeseries'] = self.timeseries
@@ -357,7 +361,7 @@ class MultiPendulum(object):
         except RuntimeError: # already present; don't save again.
             pass
         outfile.close()
-        
+
     def powerspectrum(self, eigenmodes=False):
         spacing = (np.max(self.times) - np.min(self.times))/len(self.times)
         frequencies = rfftfreq(len(self.times), spacing)
@@ -368,7 +372,7 @@ class MultiPendulum(object):
         fig, ax = plt.subplots()
         fig.set_figwidth(12)
         fig.set_figheight(6)
-        
+
         if eigenmodes:
             pseries = self.eigts
             labels = [r"\phi_{}".format(i) for i in range(self.n)]
@@ -377,12 +381,12 @@ class MultiPendulum(object):
             pseries = self.timeseries
             labels = [sp.latex(label) for label in self.q]
             title = "Frequency Power Spectrum, coordinate basis"
-            
+
         for i in range(self.n):
             amplitude = rfft(pseries[:,i])
             power = np.abs(amplitude)**2
             ax.plot(frequencies, power, label="${}$".format(labels[i]))
-        
+
         ax.set_ylabel("Power")
         ax.set_xlabel("Frequency ($s^{-1}$)")
         ax.loglog()
@@ -394,7 +398,7 @@ class MultiPendulum(object):
         ax.set_ylim(ylim)
         ax.legend()
         return fig
-        
+
 
 def get_xy_coords(p, lengths=None):
     """Get (x, y) coordinates from generalized coordinates p"""
