@@ -183,19 +183,24 @@ class MultiPendulum(object):
         for label, energy in self.numerical_energies.items():
             self.efuncs[label] = sp.lambdify(coords, energy)
 
-    def make_energy_timeseries(self):
+    def make_energy_timeseries(self, offsets=True):
         """Applies the energy functions to the results of an integration
 
         Stores the results in a dictionary, keyed by the same labels used in
         self.energies, etc.
+
+        If offsets is True, the origin in phase space is set to zero energy.
+        If offsets is False, the pivot point is set to zero potential energy.
         """
 
         self.energy_timeseries = dict()
         for label, energy in self.efuncs.items():
+            if offsets:
+                offset = energy(0,0,0,0)
             def wrapper(pos):
                 return energy(*pos)
 
-            self.energy_timeseries[label] = np.apply_along_axis(wrapper, 1, self.timeseries)
+            self.energy_timeseries[label] = np.apply_along_axis(wrapper, 1, self.timeseries) - offset
 
 
 
