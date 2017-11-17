@@ -11,6 +11,10 @@ from scipy.integrate import odeint
 
 from numpy.fft import rfft, rfftfreq
 
+import matplotlib
+if matplotlib.get_backend() == 'Qt5Agg':
+    matplotlib.use('agg')
+
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from IPython.display import HTML
@@ -442,6 +446,8 @@ class MultiPendulum(object):
         ylim = ax.get_ylim()
         for freq in markerfreqs:
             line, = ax.plot([freq, freq], ylim, ":r")
+            ax.text(freq, ylim[0], "{:.2f}".format(freq), color="red", va="bottom", ha="center",
+                   bbox=dict(facecolor='white', edgecolor='white'))
         line.set_label("Linear eigenmode frequencies")
         ax.set_ylim(ylim)
         ax.legend()
