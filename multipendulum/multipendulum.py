@@ -89,7 +89,7 @@ class MultiPendulum(object):
         # default times for integration
         self.times = np.linspace(0,100,10000)
 
-    def set_initial_conditions(self, theta_0, omega_0, degrees=True, eigenmodes=False):
+    def set_initial_conditions(self, theta_0, omega_0, degrees=False, eigenmodes=False):
         """Set initial conditions.
 
         Parameters
@@ -206,7 +206,20 @@ class MultiPendulum(object):
 
             self.energy_timeseries[label] = np.apply_along_axis(wrapper, 1, self.timeseries) - offset
 
-
+    def perturb(self, magnitude=1.0e-10, direction=None):
+        coords = list(self.q) + list(self.u)
+                
+        grad_E = np.array([sp.lambdify(coords, 
+                                       sp.diff(self.numerical_energies['E'], coord))(*self.y0) 
+                           for coord in coords])
+        grad_E_normalized = grad_E/np.sqrt(grad_E.dot(grad_E))
+        if direction is None:
+            direction = np.random.random(4)
+            
+        a = direction - direction.dot(grad_E_normalized)*grad_E_normalized
+        ahat = a/np.sqrt(a.dot(a))
+        perturbation = ahat*magnitude
+        self.y0 += perturbation
 
     def calculate_linear_eigenmodes(self):
         """Calculates linear eigenmodes via diagonalization"""
