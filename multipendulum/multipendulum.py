@@ -1,6 +1,8 @@
 # coding: utf-8
+# %load multipendulum/multipendulum.py
 import numpy as np
 import sympy as sp
+import pandas as pd
 import h5py
 
 from sympy import symbols
@@ -27,8 +29,12 @@ class MultiPendulum(object):
 
         self.n = n
         self.timeseries = None
+        
+        # coordinates
         self.q = mechanics.dynamicsymbols('theta_:{0}'.format(n))
+        self.qdot = mechanics.dynamicsymbols('theta_:{0}'.format(n), 1)
         self.u = mechanics.dynamicsymbols('thetadot_:{0}'.format(n))
+        self.p = mechanics.dynamicsymbols('p_:{}'.format(n))
 
         # mass and length
         self.m = symbols('m_:{0}'.format(n))
@@ -52,6 +58,12 @@ class MultiPendulum(object):
         particles = []
         forces = []
         kinetic_odes = []
+        
+        # energy bits
+        self.energies = dict()
+        self.energies["T"] = 0
+        self.energies["V"] = 0
+
 
         for i in range(n):
             # Create a reference frame following the i^th mass
@@ -69,14 +81,33 @@ class MultiPendulum(object):
             # Set forces & compute kinematic ODE
             forces.append((Pi, -self.m[i] * self.g * A.z))
             kinetic_odes.append(self.q[i].diff(self.t) - self.u[i])
+            
+            # build energy terms
+            Ti = Pai.kinetic_energy(A)
+            self.energies["T_{}".format(i)] = Ti
+            self.energies["T"] += Ti
+            
+            posvec = mechanics.express(Pi.pos_from(self.origin), A)
+            Vi = posvec.dot(A.z)*self.m[i]*self.g
+            self.energies["V_{}".format(i)] = Vi
+            self.energies["V"] += Vi
 
             P = Pi
-
-        # Generate equations of motion
-        self.KM = mechanics.KanesMethod(A, q_ind=self.q, u_ind=self.u,
-                                   kd_eqs=kinetic_odes)
-        self.fr, self.fr_star = self.KM.kanes_equations(particles, forces)
-
+            
+        # Lagrangian, total energy
+        self.energies["E"] = self.energies["T"] + self.energies["V"]
+        self.energies["L"] = self.energies["T"] - self.energies["V"]
+        
+        # canonical momenta
+        self.pdef = dict()
+        for i in range(n):
+            self.pdef[self.p[i]] = sp.diff(self.energies["L"], self.u[i])
+            
+        self.psubs = sp.solve([sp.Eq(p[0], p[1]) for p in self.pdef.items()], self.u)
+        
+        # substitute for Hamiltonian
+        self.energies['H'] = self.energies["E"].subs(self.psubs)
+        
         # for external use with energetics -- maybe temporary?
         self.A = A
         self.particles = particles
@@ -84,8 +115,9 @@ class MultiPendulum(object):
         self.kinetic_odes = kinetic_odes
 
         # calculate eigenmodes/eigenfrequencies
-        self.calculate_linear_eigenmodes()
-
+        # self.calculate_linear_eigenmodes()
+        self.build_energy_func()
+        
         # default times for integration
         self.times = np.linspace(0,100,10000)
 
@@ -158,29 +190,11 @@ class MultiPendulum(object):
         params = [self.g] + list(self.l) + list(self.m)
         param_vals = [9.81] + list(self.lengths) + list(self.masses)
 
-        # assemble terms analytically first
-        self.energies = dict()
-        self.energies["T"] = 0
-        self.energies["V"] = 0
-
-        for idx,pai in enumerate(self.particles):
-            # kinetic
-            self.energies["T_{}".format(idx)] = pai.kinetic_energy(self.A)
-            self.energies["T"] += self.energies["T_{}".format(idx)]
-
-            # potential
-            posvec = mechanics.express(pai.point.pos_from(self.origin), self.A)
-            self.energies["V_{}".format(idx)] = posvec.dot(self.A.z)*self.m[idx]*self.g
-            self.energies["V"] += self.energies["V_{}".format(idx)]
-
-        self.energies['E'] = self.energies["T"] + self.energies["V"]
-
-        # now substitute in parameters to get numerical expressions
+        # substitute in parameters to get numerical expressions
         self.numerical_energies = dict()
         for label, energy in self.energies.items():
             self.numerical_energies[label] = energy.subs(dict(zip(params,
                                                                   param_vals)))
-
         # finally lambdify to make executable functions
         self.efuncs = dict()
         coords = list(self.q) + list(self.u)
@@ -236,8 +250,48 @@ class MultiPendulum(object):
         Anumerical = Asimp.subs(dict(zip(parameters, parameter_vals)))
         self.S, self.D = Anumerical.diagonalize()
 
+    def integrate_hamiltonian(self, times=None):
+        """Carry out the integration using Hamilton's equations."""
+        
+        if times is None:
+            times = self.times
+        else:
+            self.times = times
+            
+        coords = list(self.q) + list(self.p)
+            
+        rhs = dict()
+        # build Hamilton's equations
+        for i in range(self.n):
+            rhs[self.q[i]] = sp.lambdify(coords, sp.diff(self.numerical_energies['H'], self.p[i]))
+            rhs[self.p[i]] = sp.lambdify(coords, -sp.diff(self.numerical_energies['H'], self.q[i]))
+            
+        def gradient(y,t):
+            rvals = np.zeros_like(y)
+            for idx, coord in enumerate(coords):
+                rvals[idx] = rhs[coord](*y)
+            return rvals
+        
+        # perform the integration
+        self.timeseries = odeint(gradient, self.y0, times)
+        
+        # make a dataframe and find the qdots
+        tsdict = dict()
+        for idx in range(self.n):
+            tsdict[self.q[idx]] = self.timeseries[:,idx]
+            tsdict[self.p[idx]] = self.timeseries[:,self.n+idx]
+            
+        self.timedf = pd.DataFrame(tsdict, index=pd.Index(self.times))
 
-    def integrate(self, times=None):
+        constants = list(self.l) + list(self.m)
+        constant_values = list(self.lengths) + list(self.masses)
+        for vel in self.u:
+            velfunc = sp.lambdify((self.q + self.p), self.psubs[vel].subs(dict(zip(constants, constant_values))))
+
+            columns = [self.timedf[coord] for coord in self.q + self.p]
+            self.timedf[vel] = velfunc(*columns)
+
+    def integrate_kane(self, times=None):
         """Carry out the integration.
 
         Parameters:
@@ -256,6 +310,11 @@ class MultiPendulum(object):
             times = self.times
         else:
             self.times = times
+            
+        # Generate Kane's equations of motion
+        self.KM = mechanics.KanesMethod(self.A, q_ind=self.q, u_ind=self.u,
+                                   kd_eqs=self.kinetic_odes)
+        self.fr, self.fr_star = self.KM.kanes_equations(self.particles, self.forces)
 
         # Fixed parameters: gravitational constant, lengths, and masses
         parameters = [self.g] + list(self.l) + list(self.m)
@@ -283,6 +342,23 @@ class MultiPendulum(object):
         # ODE integration
         self.timeseries = odeint(gradient, self.y0, times, args=(parameter_vals,))
 
+        # make a dataframe and find the p_i
+        tsdict = dict()
+        for idx in range(self.n):
+            tsdict[self.q[idx]] = self.timeseries[:,idx]
+            tsdict[self.u[idx]] = self.timeseries[:,self.n+idx]
+            
+        self.timedf = pd.DataFrame(tsdict, index=pd.Index(self.times))
+
+        constants = list(self.l) + list(self.m)
+        constant_values = list(self.lengths) + list(self.masses)
+        for p in self.p:
+            momfunc = sp.lambdify((self.q + self.u), self.pdef[p].subs(dict(zip(constants, constant_values))))
+
+            columns = [self.timedf[coord] for coord in self.q + self.u]
+            self.timedf[p] = momfunc(*columns)
+        
+        
     def project_timeseries_to_eigenmodes(self):
         """Project the timeseries onto the eigenmode basis."""
 
@@ -355,11 +431,16 @@ class MultiPendulum(object):
         fig, ax = plt.subplots(ncols=self.n)
         fig.set_figwidth(self.n*10)
         fig.set_figheight(10)
-        for idx, axis in enumerate(ax):
-            axis.plot(timeseries[:,idx], timeseries[:,self.n+idx])
-            axis.set_xlabel(r"${}$".format(sp.latex(coordinates[idx])), fontsize=18)
-            axis.set_ylabel(r"${}$".format(sp.latex(velocities[idx])), fontsize=18)
-            axis.set_title(titlestring.format(idx), fontsize=22)
+        if self.n > 1:
+            for idx, axis in enumerate(ax):
+                axis.plot(timeseries[:,idx], timeseries[:,self.n+idx])
+                axis.set_xlabel(r"${}$".format(sp.latex(coordinates[idx])), fontsize=18)
+                axis.set_ylabel(r"${}$".format(sp.latex(velocities[idx])), fontsize=18)
+                axis.set_title(titlestring.format(idx), fontsize=22)
+        else:
+            ax.plot(timeseries[:,0], timeseries[:,1])
+            ax.set_xlabel(r"${}$".format(sp.latex(coordinates[0])), fontsize=18)
+            ax.set_ylabel(r"${}$".format(sp.latex(velocities[0])), fontsize=18)
         #plt.close(fig)
         return fig
 
