@@ -197,8 +197,12 @@ class MultiPendulum(object):
                                                                   param_vals)))
         # finally lambdify to make executable functions
         self.efuncs = dict()
-        coords = list(self.q) + list(self.u)
+
         for label, energy in self.numerical_energies.items():
+            if label == 'H':
+                coords = list(self.q) + list(self.p)
+            else:
+                coords = list(self.q) + list(self.u)
             self.efuncs[label] = sp.lambdify(coords, energy)
 
     def make_energy_timeseries(self, offsets=True):
@@ -211,14 +215,17 @@ class MultiPendulum(object):
         If offsets is False, the pivot point is set to zero potential energy.
         """
 
-        self.energy_timeseries = dict()
+        offset = 0.0
         for label, energy in self.efuncs.items():
             if offsets:
                 offset = energy(0,0,0,0)
-            def wrapper(pos):
-                return energy(*pos)
 
-            self.energy_timeseries[label] = np.apply_along_axis(wrapper, 1, self.timeseries) - offset
+            if label == 'H':
+                columns = [self.timedf[coord] for coord in self.q + self.p]
+            else:
+                columns = [self.timedf[coord] for coord in self.q + self.u]
+                
+            self.timedf[label] = energy(*columns) - offset
 
     def perturb(self, magnitude=1.0e-10, direction=None):
         coords = list(self.q) + list(self.u)
@@ -250,7 +257,7 @@ class MultiPendulum(object):
         Anumerical = Asimp.subs(dict(zip(parameters, parameter_vals)))
         self.S, self.D = Anumerical.diagonalize()
 
-    def integrate_hamiltonian(self, times=None):
+    def integrate_hamiltonian(self, times=None, rtol=1.5e-8, atol=1.5e-8):
         """Carry out the integration using Hamilton's equations."""
         
         if times is None:
@@ -273,7 +280,7 @@ class MultiPendulum(object):
             return rvals
         
         # perform the integration
-        self.timeseries = odeint(gradient, self.y0, times)
+        self.timeseries = odeint(gradient, self.y0, times, rtol=rtol, atol=atol)
         
         # make a dataframe and find the qdots
         tsdict = dict()
@@ -291,7 +298,7 @@ class MultiPendulum(object):
             columns = [self.timedf[coord] for coord in self.q + self.p]
             self.timedf[vel] = velfunc(*columns)
 
-    def integrate_kane(self, times=None):
+    def integrate_kane(self, times=None, rtol=1.5e-8, atol=1.5e-8):
         """Carry out the integration.
 
         Parameters:
@@ -340,7 +347,7 @@ class MultiPendulum(object):
             return np.array(sol).T[0]
 
         # ODE integration
-        self.timeseries = odeint(gradient, self.y0, times, args=(parameter_vals,))
+        self.timeseries = odeint(gradient, self.y0, times, args=(parameter_vals,), rtol=rtol, atol=atol)
 
         # make a dataframe and find the p_i
         tsdict = dict()
