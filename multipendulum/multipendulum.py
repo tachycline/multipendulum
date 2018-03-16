@@ -289,6 +289,7 @@ class MultiPendulum(object):
             tsdict[self.p[idx]] = self.timeseries[:,self.n+idx]
             
         self.timedf = pd.DataFrame(tsdict, index=pd.Index(self.times))
+        self.timedf.index.name = "time"
 
         constants = list(self.l) + list(self.m)
         constant_values = list(self.lengths) + list(self.masses)
@@ -344,7 +345,8 @@ class MultiPendulum(object):
         def gradient(y, t, args):
             vals = np.concatenate((y, args))
             sol = np.linalg.solve(mm_func(*vals), fo_func(*vals))
-            return np.array(sol).T[0]
+            return sol.T[0]
+            #            return np.array(sol).T[0]
 
         # ODE integration
         self.timeseries = odeint(gradient, self.y0, times, args=(parameter_vals,), rtol=rtol, atol=atol)
@@ -356,7 +358,8 @@ class MultiPendulum(object):
             tsdict[self.u[idx]] = self.timeseries[:,self.n+idx]
             
         self.timedf = pd.DataFrame(tsdict, index=pd.Index(self.times))
-
+        self.timedf.index.name = "time"
+        
         constants = list(self.l) + list(self.m)
         constant_values = list(self.lengths) + list(self.masses)
         for p in self.p:
@@ -404,52 +407,6 @@ class MultiPendulum(object):
                                             interval=1000 * self.times.max() / len(self.times),
                                             blit=True, init_func=init)
         plt.close(fig)
-
-    def phase_plots(self, eigenmodes=False):
-        """Make phase space plots.
-
-        Parameters
-        ----------
-
-        eigenmodes: Boolean
-            if true, phase plots are of eigenmodes. If false, phase plots are of
-            individual links in the chain of pendulums.
-
-        Returns:
-        --------
-        The figure instance.
-        """
-        if self.timeseries is None:
-            raise ValueError("Nothing to plot!")
-
-        if eigenmodes:
-            coordinates = sp.symbols("phi_:{}".format(self.n))
-            velocities = sp.symbols("phidot_:{}".format(self.n))
-            self.project_timeseries_to_eigenmodes()
-            timeseries = self.eigts
-            titlestring = "Phase space plot, linear eigenmode {}"
-        else:
-            coordinates = self.q
-            velocities = self.u
-            timeseries = self.timeseries
-            titlestring = "Phase space plot, pendulum {}"
-
-
-        fig, ax = plt.subplots(ncols=self.n)
-        fig.set_figwidth(self.n*10)
-        fig.set_figheight(10)
-        if self.n > 1:
-            for idx, axis in enumerate(ax):
-                axis.plot(timeseries[:,idx], timeseries[:,self.n+idx])
-                axis.set_xlabel(r"${}$".format(sp.latex(coordinates[idx])), fontsize=18)
-                axis.set_ylabel(r"${}$".format(sp.latex(velocities[idx])), fontsize=18)
-                axis.set_title(titlestring.format(idx), fontsize=22)
-        else:
-            ax.plot(timeseries[:,0], timeseries[:,1])
-            ax.set_xlabel(r"${}$".format(sp.latex(coordinates[0])), fontsize=18)
-            ax.set_ylabel(r"${}$".format(sp.latex(velocities[0])), fontsize=18)
-        #plt.close(fig)
-        return fig
 
     def time_series_plots(self, eigenmodes=False):
         """Plot time series.
@@ -554,6 +511,31 @@ class MultiPendulum(object):
         ax.legend()
         return fig
 
+def run_mp(ic, pert=None, tmax=100, nsteps=10000):
+    """Run a multipendulum.
+    
+    Create and integrate a multipendulum object with the specified
+    initial conditions.
+    
+    Parameters:
+    -----------
+    ic : tuple of tuples of floats
+         initial conditions
+         example: ((0.1, 0.1), (0.0, 0.0))
+    pert : float, optional
+         perturbation to apply
+    """    
+    npends = len(ic[0])
+    pendulum = MultiPendulum(npends)
+    pendulum.set_initial_conditions(*ic, degrees=False, eigenmodes=False)
+    pendulum.build_energy_func()
+    pendulum.times = np.linspace(0, tmax, nsteps)
+    
+    if pert is not None:
+        pendulum.perturb(pert)
+    
+    pendulum.integrate_kane(atol=1.0e-12, rtol=1.0e-12)
+    return pendulum
 
 def get_xy_coords(p, lengths=None):
     """Get (x, y) coordinates from generalized coordinates p"""
