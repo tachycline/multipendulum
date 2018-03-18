@@ -43,7 +43,7 @@ def phase_plot(pend, ax, xcoord=None, ycoord=None):
 # Animation
 
 # Poincare plot
-def poincare(pend, ax3d, coord=None):
+def poincare(pend, ax3d, coord=None, **kwargs):
     """Make a Poincare plot where coord==0.
     
     Parameters:
@@ -72,7 +72,7 @@ def poincare(pend, ax3d, coord=None):
     y = section[coords[1]].values
     z = section[coords[2]].values
     
-    ax3d.scatter(x, y, z)
+    ax3d.scatter(x, y, z, **kwargs)
     ax3d.set_xlabel(r"${}$".format(sp.latex(coords[0])))
     ax3d.set_ylabel(r"${}$".format(sp.latex(coords[1])))
     ax3d.set_zlabel(r"${}$".format(sp.latex(coords[2])))
