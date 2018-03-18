@@ -3,7 +3,7 @@ Most are written with parallel execution in mind, so imports are
 handled at the function level instead of the module level.
 """
 
-def sampled_lyapunov_estimate(ic, pert=1e-10, nperts=100):
+def sampled_lyapunov_estimate(ic, pert=1e-10, nperts=100, eigenmodes=False):
     """make a statistically robust estimate of lyapunov exponent.
     
     sample different perturbations with a single set of bounds.
@@ -37,11 +37,11 @@ def sampled_lyapunov_estimate(ic, pert=1e-10, nperts=100):
         """Logarithmic fit function."""
         return a + b*np.log10(x)
 
-    baseline = mp.run_mp(ic)
+    baseline = mp.run_mp(ic, eigenmodes=eigenmodes)
     
     perts = np.ones(nperts)*pert
     for pert in perts:
-        perturbed = mp.run_mp(ic, pert)
+        perturbed = mp.run_mp(ic, pert, eigenmodes=eigenmodes)
             
         deltazvec = baseline.timeseries - perturbed.timeseries
         deltaz = np.sqrt(np.sum(deltazvec**2, axis=1))
@@ -102,7 +102,7 @@ def sampled_lyapunov_estimate(ic, pert=1e-10, nperts=100):
     pstd = np.std(powers)
     lmean = np.mean(lambdas)
     lstd = np.std(lambdas)
-    energy = baseline.efuncs['E'](*(np.array(ic).flat))
+    energy = baseline.efuncs['E'](*(baseline.y0))
     
     output = {"pmean" : pmean,
               "pstd" : pstd/np.sqrt(len(powers)),
