@@ -157,6 +157,7 @@ class MultiPendulum(object):
                                       np.broadcast_to(omega_0, self.n)])
 
         if eigenmodes:
+            self.calculate_linear_eigenmodes()
             positions = (self.S * sp.Matrix([y0[0:self.n]]).T).T
             velocities = (self.S * sp.Matrix([y0[self.n:2*self.n]]).T).T
             self.y0 = np.array(positions.tolist()[0] + velocities.tolist()[0]).astype(np.float64)
@@ -246,6 +247,9 @@ class MultiPendulum(object):
         """Calculates linear eigenmodes via diagonalization"""
 
         op_point = dict(zip(self.q+self.u, np.zeros_like(self.q+self.u)))
+        self.KM = mechanics.KanesMethod(self.A, q_ind=self.q, u_ind=self.u,
+                                   kd_eqs=self.kinetic_odes)
+        self.fr, self.fr_star = self.KM.kanes_equations(self.particles, self.forces)
         A, B, C = self.KM.linearize(op_point=op_point, A_and_B=True, new_method=True)
 
         # pull out the quadrant of the matrix we care about
@@ -511,7 +515,7 @@ class MultiPendulum(object):
         ax.legend()
         return fig
 
-def run_mp(ic, pert=None, tmax=100, nsteps=10000):
+def run_mp(ic, pert=None, tmax=100, nsteps=10000, eigenmodes=False):
     """Run a multipendulum.
     
     Create and integrate a multipendulum object with the specified
@@ -527,7 +531,7 @@ def run_mp(ic, pert=None, tmax=100, nsteps=10000):
     """    
     npends = len(ic[0])
     pendulum = MultiPendulum(npends)
-    pendulum.set_initial_conditions(*ic, degrees=False, eigenmodes=False)
+    pendulum.set_initial_conditions(*ic, degrees=False, eigenmodes=eigenmodes)
     pendulum.build_energy_func()
     pendulum.times = np.linspace(0, tmax, nsteps)
     
